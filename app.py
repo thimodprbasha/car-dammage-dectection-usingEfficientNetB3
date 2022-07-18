@@ -3,14 +3,18 @@ from uuid import uuid4
 
 from flask import Flask, request, json
 from werkzeug.utils import secure_filename
-import  dectection
+from flask_cors import CORS
+import dectection
+
 uploads = './uploads/temp_image'
 
 application = Flask(__name__)
+cors = CORS(application)
 application.config['UPLOAD_FOLDER'] = uploads
 
 # Allowed file type
 ALLOWED_EXTENSIONS = {'jpg', 'jpeg'}
+
 
 # Check file type
 def allowed_file(filename):
@@ -39,6 +43,7 @@ application.register_error_handler(500, internal_server_error)
 
 @application.route('/api/detect-car-damage', methods=['POST'])
 def get_fer_demography():
+    print(request.files)
     if 'file' not in request.files:
         data = {
             'Message': 'Image not found!'

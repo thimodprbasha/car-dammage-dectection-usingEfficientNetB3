@@ -3,14 +3,12 @@ import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from keras.utils import get_file
-from keras.utils.image_utils import array_to_img, img_to_array, load_img
+from keras.utils.image_utils import img_to_array, load_img
 from keras.applications.vgg16 import VGG16
-from keras.applications.imagenet_utils import preprocess_input, decode_predictions
+from keras.applications.imagenet_utils import preprocess_input
 import numpy as np
 import pandas as pd
 import pickle as pk
-import shutil
-import time
 import cv2 as cv2
 from keras.models import load_model
 import matplotlib.pyplot as plt
@@ -154,30 +152,93 @@ def predictor(image_path, csv_path, model_path, averaged=True, verbose=True):
         return None, None, None, df
 
 
+def get_result(klass, prob, data ,type):
+    if 0 < prob < 30:
+        result = {
+            'error': None,
+            'result': {
+                'image_instrument': type,
+                'probability': "{:.2f}".format(prob),
+                'severity_level': 'minor',
+                'price': data['data']['minor'][klass]
+            }
+        }
+        return result
+    elif 30 < prob < 70:
+        result = {
+            'error': None,
+            'result': {
+                'image_instrument': type,
+                'probability': "{:.2f}".format(prob),
+                'severity_level': 'moderate',
+                'price': data['data']['moderate'][klass]
+            }
+        }
+        return result
+    else:
+        result = {
+            'error': None,
+            'result': {
+                'image_instrument': type,
+                'probability': "{:.2f}".format(prob),
+                'severity_level': 'major',
+                'price': data['data']['moderate'][klass]
+            }
+        }
+        return result
+
+
+def calculate_price(klass, prob):
+    data = []
+    with open('./data/price_data.json', 'r') as f:
+        data = json.load(f)
+
+    if klass == "bumper_dent":
+        return get_result(klass, prob, data , "Bumper Dent")
+    elif klass == "bumper_scratch":
+        return get_result(klass, prob, data , "Bumper Scratch")
+    elif klass == "door_dent":
+        return get_result(klass, prob, data , "Door Dent")
+    elif klass == "door_scratch":
+        return get_result(klass, prob, data , "Door Scratch")
+    elif klass == "glass_shatter":
+        return get_result(klass, prob, data , "Glass Shatter")
+    elif klass == "head_lamp":
+        return get_result(klass, prob, data , "Head Lamp")
+    elif klass == "tail_lamp":
+        return get_result(klass, prob, data ,"Tail Lamp")
+
+
 def engine(img_path):
     csv_path = "./model/class_dict.csv"  # path to class_dict.csv
     model_path = "./model/EfficientNetB3-instruments-94.99.h5"
-
 
     img_224 = prepare_img_224(img_path)
     g1 = car_categories_gate(img_224, first_gate)
 
     if g1 is False:
-        result = {'gate1': 'Car validation check: ',
-                  'gate1_result': 0,
-                  'gate1_message': {0: 'Are you sure this is a picture of your car? Please retry your submission.',
-                                    1: 'Hint: Try zooming in/out, using a different angle or different lighting'},
-                  'gate2': None,
-                  'gate2_result': None,
-                  'gate2_message': {0: None, 1: None},
-                  'location': None,
-                  'severity': None,
-                  'final': 'Damage assessment unsuccessful!'}
+        result = {
+            'error': 'Are you sure this is a picture of your car? Please retry your submission.',
+            'result': {
+                'image_instrument': None,
+                'probability': None,
+                'severity_level ': None,
+                'price': None
+            }
+        }
         return result
     else:
         klass, prob, img, df = predictor(img_path, csv_path, model_path, averaged=True, verbose=False)
-        result =  {
-            'image is of instrument' : klass,
-            'probability ' : prob * 100
-        }
-        return result
+        if klass == 'unknown':
+            result = {
+                'error': 'Are you sure this is a picture of a damage car? Please retry your submission.',
+                'result': {
+                    'image_instrument': None,
+                    'probability': None,
+                    'severity_level ': None,
+                    'price': None
+                }
+            }
+            return result
+        else:
+            return calculate_price(klass, prob*100)

@@ -1,0 +1,31 @@
+{
+  "data": {
+    "minor": {
+      "bumper_dent": 55000,
+      "bumper_scratch": 6000,
+      "door_dent": 12000,
+      "door_scratch": 10000,
+      "glass_shatter": 11000,
+      "head_lamp": 25000,
+      "tail_lamp": 15000
+    },
+    "moderate": {
+      "bumper_dent": 55000,
+      "bumper_scratch": 15000,
+      "door_dent": 15000,
+      "door_scratch": 15000,
+      "glass_shatter": 15000,
+      "head_lamp": 45000,
+      "tail_lamp": 25000
+    },
+    "major": {
+      "bumper_dent": 55000,
+      "bumper_scratch": 22000,
+      "door_dent": 22000,
+      "door_scratch": 50000,
+      "glass_shatter": 22000,
+      "head_lamp": 85000,
+      "tail_lamp": 35000
+    }
+  }
+}
