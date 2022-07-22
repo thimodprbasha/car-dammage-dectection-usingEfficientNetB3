@@ -8,9 +8,9 @@ import dectection
 
 uploads = './uploads/temp_image'
 
-application = Flask(__name__)
-cors = CORS(application)
-application.config['UPLOAD_FOLDER'] = uploads
+app = Flask(__name__)
+cors = CORS(app)
+app.config['UPLOAD_FOLDER'] = uploads
 
 # Allowed file type
 ALLOWED_EXTENSIONS = {'jpg', 'jpeg'}
@@ -23,7 +23,7 @@ def allowed_file(filename):
 
 
 def response_config(data, status_code, mime_type):
-    return application.response_class(
+    return app.response_class(
         response=json.dumps(data),
         status=status_code,
         mimetype=mime_type
@@ -38,10 +38,10 @@ def internal_server_error(e):
     return response_config(data, 500, 'application/json')
 
 
-application.register_error_handler(500, internal_server_error)
+app.register_error_handler(500, internal_server_error)
 
 
-@application.route('/api/detect-car-damage', methods=['POST'])
+@app.route('/api/detect-car-damage', methods=['POST'])
 def get_fer_demography():
     print(request.files)
     if 'file' not in request.files:
@@ -50,42 +50,47 @@ def get_fer_demography():
         }
         return response_config(data, 404, 'application/json')
 
-    image = request.files['file']
-    if image.filename == '':
-        data = {
-            'Message': 'No selected image!'
-        }
-        return response_config(data, 404, 'application/json')
-
-    if image and allowed_file(image.filename):
-        try:
-            filename = secure_filename(image.filename)
-            temp_image = os.path.join(application.config['UPLOAD_FOLDER'], uuid4().__str__() + filename)
-            image.save(temp_image)
-
-            res = dectection.engine(temp_image)
-
-            if os.path.isfile(temp_image):
-                os.remove(temp_image)
-            else:
-                application.logger.warn("Error: %s file not found" % temp_image)
-
-            return response_config(res, 202, 'application/json')
-
-        except Exception as e:
-            application.logger.error('Model Error : ', str(e))
-
+    for image in request.files.getlist('file'):
+        print(image)
+        if image.filename == '':
             data = {
-                'Message': str(e)
+                'Message': 'No selected image!'
             }
-            return response_config(data, 505, 'application/json')
+            return response_config(data, 404, 'application/json')
 
-    else:
-        data = {
-            'Message': 'Invalid image type!'
-        }
-        return response_config(data, 404, 'application/json')
+        if image and allowed_file(image.filename):
+            try:
+                filename = secure_filename(image.filename)
+                temp_image = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                image.save(temp_image)
+
+
+            except Exception as e:
+                app.logger.error('Error : ', str(e))
+
+                data = {
+                    'Message': str(e)
+                }
+                return response_config(data, 505, 'application/json')
+
+        else:
+            data = {
+                'Message': 'Invalid image type!'
+            }
+            return response_config(data, 404, 'application/json')
+
+    res, path_list = dectection.engine()
+    try:
+        for path in path_list:
+            if os.path.isfile(path):
+                os.remove(path)
+            else:
+                app.logger.warn("Error: %s file not found" % path)
+    except Exception as e:
+        app.logger.error('Error : ', str(e))
+
+    return response_config(res, 202, 'application/json')
 
 
 if __name__ == '__main__':
-    application.run(debug=True)
+    app.run(debug=True)

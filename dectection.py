@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 
@@ -11,6 +12,7 @@ import pandas as pd
 import pickle as pk
 import cv2 as cv2
 from keras.models import load_model
+import geocoder
 import matplotlib.pyplot as plt
 
 first_gate = VGG16(weights='imagenet')
@@ -62,7 +64,7 @@ def get_predictions(preds, top=5):
     return results
 
 
-def predictor(image_path, csv_path, model_path, averaged=True, verbose=True):
+def predictor(path_list, csv_path, model_path, averaged=False, verbose=True):
     # read in the csv file
     class_df = pd.read_csv(csv_path)
     class_count = len(class_df['class'].unique())
@@ -80,8 +82,8 @@ def predictor(image_path, csv_path, model_path, averaged=True, verbose=True):
         split = scale.split('-')
         s1 = float(split[1])
         s2 = float(split[0].split('*')[1])
-    path_list = []
-    path_list.append(image_path)
+    # path_list = []
+    # path_list.append(image_path)
     # paths = os.listdir(sdir)
     # for f in paths:
     #     path_list.append(os.path.join(sdir, f))
@@ -105,140 +107,162 @@ def predictor(image_path, csv_path, model_path, averaged=True, verbose=True):
         except:
             if verbose:
                 print(path_list[i], ' is an invalid image file')
-    if good_image_count == 1:  # if only a single image need to expand dimensions
-        averaged = True
+    # if good_image_count == 1:  # if only a single image need to expand dimensions
+    #     averaged = True
     image_array = np.array(image_list)
     # make predictions on images, sum the probabilities of each class then find class index with
     # highest probability
     preds = model.predict(image_array)
-    if averaged:
-        psum = []
-        for i in range(class_count):  # create all 0 values list
-            psum.append(0)
-        for p in preds:  # iterate over all predictions
-            for i in range(class_count):
-                psum[i] = psum[i] + p[i]  # sum the probabilities
-        index = np.argmax(psum)  # find the class index with the highest probability sum
+    # if averaged:
+    #     psum = []
+    #     for i in range(class_count):  # create all 0 values list
+    #         psum.append(0)
+    #     for p in preds:  # iterate over all predictions
+    #         for i in range(class_count):
+    #             psum[i] = psum[i] + p[i]  # sum the probabilities
+    #     index = np.argmax(psum)  # find the class index with the highest probability sum
+    #     klass = class_df['class'].iloc[index]  # get the class name that corresponds to the index
+    #     prob = psum[index] / good_image_count  # get the probability average
+    #     # to show the correct image run predict again and select first image that has same index
+    #     for img in image_array:  # iterate through the images
+    #         test_img = np.expand_dims(img, axis=0)  # since it is a single image expand dimensions
+    #         test_index = np.argmax(
+    #             model.predict(test_img))  # for this image find the class index with highest probability
+    #         if test_index == index:  # see if this image has the same index as was selected previously
+    #             if verbose:  # show image and print result if verbose=1
+    #                 plt.axis('off')
+    #                 plt.imshow(img)  # show the image
+    #                 print(f'predicted species is {klass} with a probability of {prob:6.4f} ')
+    #             break  # found an image that represents the predicted class
+    #     return klass, prob, img, None
+    # else:  # create individual predictions for each image
+    data = []
+    data_err = []
+    total_price = 0
+    err = False
+    for i, p in enumerate(preds):
+        index = np.argmax(p)  # find the class index with the highest probability sum
         klass = class_df['class'].iloc[index]  # get the class name that corresponds to the index
-        prob = psum[index] / good_image_count  # get the probability average
-        # to show the correct image run predict again and select first image that has same index
-        for img in image_array:  # iterate through the images
-            test_img = np.expand_dims(img, axis=0)  # since it is a single image expand dimensions
-            test_index = np.argmax(
-                model.predict(test_img))  # for this image find the class index with highest probability
-            if test_index == index:  # see if this image has the same index as was selected previously
-                if verbose:  # show image and print result if verbose=1
-                    plt.axis('off')
-                    plt.imshow(img)  # show the image
-                    print(f'predicted species is {klass} with a probability of {prob:6.4f} ')
-                break  # found an image that represents the predicted class
-        return klass, prob, img, None
-    else:  # create individual predictions for each image
-        pred_class = []
-        prob_list = []
-        for i, p in enumerate(preds):
-            index = np.argmax(p)  # find the class index with the highest probability sum
-            klass = class_df['class'].iloc[index]  # get the class name that corresponds to the index
-            image_file = file_list[i]
-            pred_class.append(klass)
-            prob_list.append(p[index])
-        Fseries = pd.Series(file_list, name='image file')
-        Lseries = pd.Series(pred_class, name='species')
-        Pseries = pd.Series(prob_list, name='probability')
-        df = pd.concat([Fseries, Lseries, Pseries], axis=1)
-        if verbose:
-            length = len(df)
-            print(df.head(length))
-        return None, None, None, df
+        image_file = file_list[i]
+        if klass == "unknown":
+            err = True
+            data_err.append({'file_name': image_file})
+            continue
+        prob_obj, price = calculate_price(klass, p[index], image_file)
+        data.append(prob_obj)
+        total_price = total_price + price
+    if err is True:
+        return data_err, total_price, err
+    return data, total_price, err
 
 
-def get_result(klass, prob, data ,type):
+def get_result(klass, prob, data, type, image_file):
     if 0 < prob < 30:
+        price = data['data']['minor'][klass]
         result = {
-            'error': None,
-            'result': {
-                'image_instrument': type,
-                'probability': "{:.2f}".format(prob),
-                'severity_level': 'minor',
-                'price': data['data']['minor'][klass]
-            }
+            'file_name': image_file,
+            'image_instrument': type,
+            'probability': "{:.2f}".format(prob),
+            'severity_level': 'Minor',
+            'price': price
         }
-        return result
+        return result, price
     elif 30 < prob < 70:
+        price = data['data']['moderate'][klass]
         result = {
-            'error': None,
-            'result': {
-                'image_instrument': type,
-                'probability': "{:.2f}".format(prob),
-                'severity_level': 'moderate',
-                'price': data['data']['moderate'][klass]
-            }
+            'file_name': image_file,
+            'image_instrument': type,
+            'probability': "{:.2f}".format(prob),
+            'severity_level': 'Moderate',
+            'price': price
         }
         return result
     else:
+        price = data['data']['major'][klass]
         result = {
-            'error': None,
-            'result': {
-                'image_instrument': type,
-                'probability': "{:.2f}".format(prob),
-                'severity_level': 'major',
-                'price': data['data']['moderate'][klass]
-            }
+            'file_name': image_file,
+            'image_instrument': type,
+            'probability': "{:.2f}".format(prob),
+            'severity_level': 'Major',
+            'price': price
         }
-        return result
+        return result, price
 
 
-def calculate_price(klass, prob):
-    data = []
+def calculate_price(klass, prob, image_file):
     with open('./data/price_data.json', 'r') as f:
         data = json.load(f)
 
     if klass == "bumper_dent":
-        return get_result(klass, prob, data , "Bumper Dent")
+        return get_result(klass, prob, data, "Bumper Dent", image_file)
     elif klass == "bumper_scratch":
-        return get_result(klass, prob, data , "Bumper Scratch")
+        return get_result(klass, prob, data, "Bumper Scratch", image_file)
     elif klass == "door_dent":
-        return get_result(klass, prob, data , "Door Dent")
+        return get_result(klass, prob, data, "Door Dent", image_file)
     elif klass == "door_scratch":
-        return get_result(klass, prob, data , "Door Scratch")
+        return get_result(klass, prob, data, "Door Scratch", image_file)
     elif klass == "glass_shatter":
-        return get_result(klass, prob, data , "Glass Shatter")
+        return get_result(klass, prob, data, "Glass Shatter", image_file)
     elif klass == "head_lamp":
-        return get_result(klass, prob, data , "Head Lamp")
+        return get_result(klass, prob, data, "Head Lamp", image_file)
     elif klass == "tail_lamp":
-        return get_result(klass, prob, data ,"Tail Lamp")
+        return get_result(klass, prob, data, "Tail Lamp", image_file)
+    # elif klass == "unknown":
+    #     return {'filename': image_file}
 
 
-def engine(img_path):
+def engine():
     csv_path = "./model/class_dict.csv"  # path to class_dict.csv
     model_path = "./model/EfficientNetB3-instruments-94.99.h5"
+    img_path = "./uploads/temp_image"
 
-    img_224 = prepare_img_224(img_path)
-    g1 = car_categories_gate(img_224, first_gate)
+    response = {
+        'error': None,
+        'error_msg': None,
+        'result': [],
+        'calculated_price': None,
+        'location': None,
+        'time': None
+    }
 
-    if g1 is False:
-        result = {
-            'error': 'Are you sure this is a picture of your car? Please retry your submission.',
-            'result': {
-                'image_instrument': None,
-                'probability': None,
-                'severity_level ': None,
-                'price': None
+    path_list = []
+    paths = os.listdir(img_path)
+    for file in paths:
+        path_list.append(os.path.join(img_path, file))
+
+    for path in path_list:
+        print(path)
+        img_224 = prepare_img_224(path)
+        g1 = car_categories_gate(img_224, first_gate)
+
+        if g1 is False:
+            fileName = os.path.basename(path)
+            prop = {
+                'file_name': fileName
             }
-        }
-        return result
+            response['error'] = True
+            response['result'].append(prop)
+
+    if response['error'] is True:
+        response['error_msg'] = 'Are you sure this is a picture of your car? Please retry your submission.'
+        return response, path_list
+
+    klass, total_price, err = predictor(path_list, csv_path, model_path, averaged=True, verbose=False)
+
+    if err is True:
+        response['error'] = True
+        response['error_msg'] = 'Are you sure this is a picture of a damage car? Please retry your submission.'
+        response['result'].extend(klass)
+
+        return response, path_list
     else:
-        klass, prob, img, df = predictor(img_path, csv_path, model_path, averaged=True, verbose=False)
-        if klass == 'unknown':
-            result = {
-                'error': 'Are you sure this is a picture of a damage car? Please retry your submission.',
-                'result': {
-                    'image_instrument': None,
-                    'probability': None,
-                    'severity_level ': None,
-                    'price': None
-                }
-            }
-            return result
-        else:
-            return calculate_price(klass, prob*100)
+        g = geocoder.ip('me')
+        response['location'] = {
+            'address': g.address
+        }
+        response['error'] = 0
+        response['result'].extend(klass)
+        response['calculated_price'] = total_price
+        response['time'] = datetime.datetime.now()
+
+        return response, path_list
