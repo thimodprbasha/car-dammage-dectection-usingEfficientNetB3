@@ -13,7 +13,17 @@ import pickle as pk
 import cv2 as cv2
 from keras.models import load_model
 import geocoder
-import matplotlib.pyplot as plt
+from pymongo import MongoClient
+import json
+from bson import ObjectId, json_util
+
+
+class JSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        return json.JSONEncoder.default(self, o)
+
 
 first_gate = VGG16(weights='imagenet')
 
@@ -23,6 +33,24 @@ print("Cat list loaded")
 
 CLASS_INDEX = None
 CLASS_INDEX_PATH = 'https://s3.amazonaws.com/deep-learning-models/image-models/imagenet_class_index.json'
+
+
+def get_database():
+    # add db URL
+    CONNECTION_STRING = "mongodb+srv://dbuser:12345@cluster0.rrmk7.mongodb.net/test?retryWrites=true&w=majority"
+
+    client = MongoClient(CONNECTION_STRING, serverSelectionTimeoutMS=5000)
+    try:
+
+        print(client.server_info())
+        db = client['car_damage']
+        collection = db['records']
+        print("ss", db)
+        return collection, False
+
+    except Exception as err:
+        print("ERROR : ", err)
+        return err, True
 
 
 def prepare_img_224(img_path):
@@ -211,12 +239,15 @@ def calculate_price(klass, prob, image_file):
     #     return {'filename': image_file}
 
 
-def engine():
+def engine(db , db_err):
     csv_path = "./model/class_dict.csv"  # path to class_dict.csv
     model_path = "./model/EfficientNetB3-instruments-94.99.h5"
     img_path = "./uploads/temp_image"
 
     response = {
+        'created_at': None,
+        'updated_at': None,
+        'deleted_At': None,
         'error': None,
         'error_msg': None,
         'result': [],
@@ -224,6 +255,12 @@ def engine():
         'location': None,
         'time': None
     }
+
+    timestamp = str(datetime.datetime.now())
+    if db_err:
+        response['error'] = True
+        response['error_msg'] = 'Database Connection Error'
+        return response
 
     path_list = []
     paths = os.listdir(img_path)
@@ -244,25 +281,35 @@ def engine():
             response['result'].append(prop)
 
     if response['error'] is True:
+        response['created_at'] = timestamp
+        response['updated_at'] = timestamp
         response['error_msg'] = 'Are you sure this is a picture of your car? Please retry your submission.'
+        db.insert_one(json.loads(json_util.dumps(response)))
+
         return response, path_list
 
     klass, total_price, err = predictor(path_list, csv_path, model_path, averaged=True, verbose=False)
 
     if err is True:
+        response['created_at'] = timestamp
+        response['updated_at'] = timestamp
         response['error'] = True
         response['error_msg'] = 'Are you sure this is a picture of a damage car? Please retry your submission.'
         response['result'].extend(klass)
+        db.insert_one(json.loads(json_util.dumps(response)))
 
         return response, path_list
     else:
         g = geocoder.ip('me')
+        response['created_at'] = timestamp
+        response['updated_at'] = timestamp
         response['location'] = {
             'address': g.address
         }
         response['error'] = 0
         response['result'].extend(klass)
         response['calculated_price'] = total_price
-        response['time'] = datetime.datetime.now()
+        response['time'] = timestamp
+        db.insert_one(json.loads(json_util.dumps(response)))
 
         return response, path_list

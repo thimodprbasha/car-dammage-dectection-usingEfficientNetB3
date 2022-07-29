@@ -1,10 +1,9 @@
 import os
-from uuid import uuid4
-
 from flask import Flask, request, json
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import dectection
+from pymongo import MongoClient
 
 uploads = './uploads/temp_image'
 
@@ -14,6 +13,26 @@ app.config['UPLOAD_FOLDER'] = uploads
 
 # Allowed file type
 ALLOWED_EXTENSIONS = {'jpg', 'jpeg'}
+
+
+def get_database():
+    # add db URL
+    CONNECTION_STRING = "ADD UR MOGODB URI"
+
+    client = MongoClient(CONNECTION_STRING, serverSelectionTimeoutMS=5000)
+    try:
+
+        print(client.server_info())
+        db = client['car_damage']
+        collection = db['records']
+        return collection, False
+
+    except Exception as err:
+        print("ERROR : ", err)
+        return err, True
+
+
+db, db_err = get_database()
 
 
 # Check file type
@@ -79,7 +98,7 @@ def get_fer_demography():
             }
             return response_config(data, 404, 'application/json')
 
-    res, path_list = dectection.engine()
+    res, path_list = dectection.engine(db , db_err)
     try:
         for path in path_list:
             if os.path.isfile(path):
